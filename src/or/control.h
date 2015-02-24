@@ -115,6 +115,10 @@ void control_event_hs_descriptor_received(const rend_data_t *rend_query,
 void control_event_hs_descriptor_failed(const rend_data_t *rend_query,
                                         const char *hs_dir,
                                         const char *reason);
+void control_event_hs_descriptor_content(const char *onion_address,
+                                         const char *desc_id,
+                                         const char *hsdir_fp,
+                                         const char *content);
 
 void control_free_all(void);
 
@@ -157,7 +161,8 @@ void control_free_all(void);
 #define EVENT_CIRC_BANDWIDTH_USED     0x001D
 #define EVENT_TRANSPORT_LAUNCHED      0x0020
 #define EVENT_HS_DESC                 0x0021
-#define EVENT_MAX_                    0x0021
+#define EVENT_HS_DESC_CONTENT         0x0022
+#define EVENT_MAX_                    0x0022
 /* If EVENT_MAX_ ever hits 0x003F, we need to make the mask into a
  * different structure, as it can only handle a maximum left shift of 1<<63. */
 
