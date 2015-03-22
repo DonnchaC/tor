@@ -157,6 +157,8 @@ static int handle_control_resolve(control_connection_t *conn, uint32_t len,
 static int handle_control_usefeature(control_connection_t *conn,
                                      uint32_t len,
                                      const char *body);
+static int handle_control_hspost(control_connection_t *conn, uint32_t len,
+                                 const char *body);
 static int write_stream_target_to_buf(entry_connection_t *conn, char *buf,
                                       size_t len);
 static void orconn_target_get_name(char *buf, size_t len,
@@ -3211,6 +3213,110 @@ handle_control_dropguards(control_connection_t *conn,
   return 0;
 }
 
+/** Implementation for the HSPOST command. */
+static int
+handle_control_hspost(control_connection_t *conn,
+                      uint32_t len,
+                      const char *body)
+{
+  char *desc;
+
+  rend_service_descriptor_t *parsed;
+  char desc_id[DIGEST_LEN];
+  char *intro_content;
+  size_t intro_size;
+  size_t encoded_size;
+  const char *next_desc;
+
+  char *cp = memchr(body, '\n', len);
+  smartlist_t *args, *hsdirs = smartlist_new();
+  tor_assert(cp);
+  *cp++ = '\0';
+
+  args = getargs_helper("+HSPOST", conn, body, 0, -1);
+
+  /** Parse each server fingeprint from the options  **/
+  SMARTLIST_FOREACH_BEGIN(args, char *, arg) {
+    /* TODO: Extract list of server arguments */
+    const node_t *node;
+    static const char *opt_server = "SERVER=";
+
+    if (!strcasecmpstart(arg, opt_server)) {
+      const char *server;
+
+      server = arg + strlen(opt_server);
+
+      node = node_get_by_hex_id(server);
+      if (!node) {
+        connection_printf_to_buf(conn, "552 Server \"%s\" not found\r\n",
+                                 server);
+        goto done;
+      }
+      /* Valid server, add it to our local list. */
+      smartlist_add(hsdirs, node->rs);
+    } else {
+      connection_printf_to_buf(conn, "552 Unexpected argument \"%s\"\r\n",
+                               arg);
+      goto done;
+    }
+  } SMARTLIST_FOREACH_END(arg);
+
+  read_escaped_data(cp, len-(cp-body), &desc);
+
+  /* Check that the descriptor can be parsed */
+  if (rend_parse_v2_service_descriptor(&parsed, desc_id, &intro_content,
+                                       &intro_size, &encoded_size,
+                                       &next_desc, desc, 1) < 0) {
+    connection_printf_to_buf(conn, "554 Invalid descriptor\r\n");
+    goto done;
+  }
+
+  /* We don't care about the introduction points or parsed descriptor. */
+  tor_free(intro_content);
+  tor_free(parsed);
+
+  /*
+  If 'hsdir' smartlist is empty or doesn't exist add the responsible
+  directories. TODO: Does !hsdirs mean empty
+  */
+  if(!hsdirs){
+    if (hid_serv_get_responsible_directories(hsdirs,
+                                             desc_id) < 0) {
+      connection_printf_to_buf(conn, "552 Could not determine the responsible "
+                                     "hidden service directories\r\n");
+      goto done;
+    }
+  }
+
+  /* We are about to trigger HSDir upload so send the OK now because after
+   * that 650 event(s) are possible so better to have the 250 OK before them
+   * to avoid out of order replies. */
+  send_control_done(conn);
+
+  /* Trigger the fetch using the built rend query and possibly a list of HS
+   * directory to use. */
+
+  SMARTLIST_FOREACH_BEGIN(hsdirs, routerstatus_t *, hsdir) {
+    /* Send upload to each specified HSDir. */
+    directory_initiate_command_routerstatus(hsdir,
+                                            DIR_PURPOSE_UPLOAD_RENDDESC_V2,
+                                            ROUTER_PURPOSE_GENERAL,
+                                            DIRIND_ANONYMOUS, NULL,
+                                            desc,
+                                            strlen(desc), 0);
+  } SMARTLIST_FOREACH_END(hsdir);
+
+ done:
+  SMARTLIST_FOREACH(args, char *, arg, tor_free(arg));
+  smartlist_free(args);
+  if (hsdirs) {
+    smartlist_free(hsdirs);
+  }
+  // TODO: how to free rend_service_descriptor_free(parsed);
+  tor_free(desc);
+  return 0;
+}
+
 /** Called when <b>conn</b> has no more bytes left on its outbuf. */
 int
 connection_control_finished_flushing(control_connection_t *conn)
@@ -3507,6 +3613,9 @@ connection_control_process_inbuf(control_connection_t *conn)
       return -1;
   } else if (!strcasecmp(conn->incoming_cmd, "DROPGUARDS")) {
     if (handle_control_dropguards(conn, cmd_data_len, args))
+      return -1;
+  } else if (!strcasecmp(conn->incoming_cmd, "+HSPOST")) {
+    if (handle_control_hspost(conn, cmd_data_len, args))
       return -1;
   } else {
     connection_printf_to_buf(conn, "510 Unrecognized command \"%s\"\r\n",
