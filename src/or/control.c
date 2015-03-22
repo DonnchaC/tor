@@ -3219,48 +3219,51 @@ handle_control_hspost(control_connection_t *conn,
                       uint32_t len,
                       const char *body)
 {
-  char *desc;
-
   rend_service_descriptor_t *parsed;
   char desc_id[DIGEST_LEN];
+  char *cp, *desc;
   char *intro_content;
   size_t intro_size;
   size_t encoded_size;
   const char *next_desc;
 
-  char *cp = memchr(body, '\n', len);
-  smartlist_t *args, *hsdirs = smartlist_new();
-  tor_assert(cp);
-  *cp++ = '\0';
+  smartlist_t *args = smartlist_new(), *hsdirs = smartlist_new();
+  static const char *opt_server = "SERVER=";
 
-  args = getargs_helper("+HSPOST", conn, body, 0, -1);
+  /* If any SERVER= options were specified, try parse the options line */
+  if (!strcasecmpstart(body, opt_server)) {
+    /* Set cp to start of the descriptor content */
+    cp = memchr(body, '\n', len);
+    *cp++ = '\0';
 
-  /** Parse each server fingeprint from the options  **/
-  SMARTLIST_FOREACH_BEGIN(args, char *, arg) {
-    /* TODO: Extract list of server arguments */
-    const node_t *node;
-    static const char *opt_server = "SERVER=";
+    args = getargs_helper("+HSPOST", conn, body, 0, -1);
 
-    if (!strcasecmpstart(arg, opt_server)) {
-      const char *server;
+    /** Parse each server fingeprint from the options **/
+    SMARTLIST_FOREACH_BEGIN(args, char *, arg) {
+      const node_t *node;
 
-      server = arg + strlen(opt_server);
+      if (!strcasecmpstart(arg, opt_server)) {
+        const char *server;
+        server = arg + strlen(opt_server);
 
-      node = node_get_by_hex_id(server);
-      if (!node) {
-        connection_printf_to_buf(conn, "552 Server \"%s\" not found\r\n",
-                                 server);
+        node = node_get_by_hex_id(server);
+        if (!node) {
+          connection_printf_to_buf(conn, "552 Server \"%s\" not found\r\n",
+                                   server);
+          goto done;
+        }
+        /* Valid server, add it to our local list. */
+        smartlist_add(hsdirs, node->rs);
+      } else {
+        connection_printf_to_buf(conn, "552 Unexpected argument \"%s\"\r\n",
+                                 arg);
         goto done;
       }
-      /* Valid server, add it to our local list. */
-      smartlist_add(hsdirs, node->rs);
-    } else {
-      connection_printf_to_buf(conn, "552 Unexpected argument \"%s\"\r\n",
-                               arg);
-      goto done;
-    }
-  } SMARTLIST_FOREACH_END(arg);
-
+    } SMARTLIST_FOREACH_END(arg);
+  } else {
+    /* No options were specified, descriptor should begin on the first line */
+    cp = (char*) body;
+  }
   read_escaped_data(cp, len-(cp-body), &desc);
 
   /* Check that the descriptor can be parsed */
@@ -3275,11 +3278,9 @@ handle_control_hspost(control_connection_t *conn,
   tor_free(intro_content);
   tor_free(parsed);
 
-  /*
-  If 'hsdir' smartlist is empty or doesn't exist add the responsible
-  directories. TODO: Does !hsdirs mean empty
-  */
-  if(!hsdirs){
+  /** If the hsdir list is empty, determine the set of responsible HS
+   * directories */
+  if (!hsdirs || smartlist_len(hsdirs) == 0){
     if (hid_serv_get_responsible_directories(hsdirs,
                                              desc_id) < 0) {
       connection_printf_to_buf(conn, "552 Could not determine the responsible "
@@ -3307,13 +3308,15 @@ handle_control_hspost(control_connection_t *conn,
   } SMARTLIST_FOREACH_END(hsdir);
 
  done:
-  SMARTLIST_FOREACH(args, char *, arg, tor_free(arg));
-  smartlist_free(args);
-  if (hsdirs) {
+  if(args){
+    SMARTLIST_FOREACH(args, char *, arg, tor_free(arg));
+    smartlist_free(args);
+  }
+  if(hsdirs){
+    SMARTLIST_FOREACH(hsdirs, routerstatus_t *, hsdir, tor_free(hsdir));
     smartlist_free(hsdirs);
   }
-  // TODO: how to free rend_service_descriptor_free(parsed);
-  tor_free(desc);
+  // tor_free(desc);
   return 0;
 }
 
