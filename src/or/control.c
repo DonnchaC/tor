@@ -3242,7 +3242,7 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
   /* Test if it's an HS address without the .onion part. */
   if (rend_valid_service_id(arg1)) {
     hsaddress = arg1;
-  } else if (strstr(arg1, v2_str) &&
+  } else if (strcmpstart(arg1, v2_str) == 0 &&
              strlen(arg1 + v2_str_len) == REND_DESC_ID_V2_LEN_BASE32 &&
              base32_decode(digest, sizeof(digest), arg1 + v2_str_len,
                            REND_DESC_ID_V2_LEN_BASE32) == 0) {
@@ -3250,7 +3250,7 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
      * of the id. */
     desc_id = digest;
   } else {
-    connection_printf_to_buf(conn, "552 Unrecognized \"%s\"\r\n",
+    connection_printf_to_buf(conn, "513 Unrecognized \"%s\"\r\n",
                              arg1);
     goto done;
   }
@@ -3277,7 +3277,7 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
       /* Valid server, add it to our local list. */
       smartlist_add(hsdirs, node->rs);
     } else {
-      connection_printf_to_buf(conn, "552 Unexpected argument \"%s\"\r\n",
+      connection_printf_to_buf(conn, "513 Unexpected argument \"%s\"\r\n",
                                arg);
       goto done;
     }
@@ -3292,7 +3292,7 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
     /* Using a descriptor ID, we force the user to provide at least one
      * hsdir server using the SERVER= option. */
     if (!hsdirs || !smartlist_len(hsdirs)) {
-      connection_printf_to_buf(conn, "552 SERVER= option is required\r\n");
+      connection_printf_to_buf(conn, "512 SERVER= option is required\r\n");
       goto done;
     }
     memcpy(rend_query->descriptor_id, desc_id,
@@ -3312,9 +3312,7 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
   rend_client_fetch_v2_desc(rend_query, hsdirs);
 
 done:
-  if (hsdirs) {
-    smartlist_free(hsdirs);
-  }
+  smartlist_free(hsdirs);
   if (args) {
     SMARTLIST_FOREACH(args, char *, cp, tor_free(cp));
     smartlist_free(args);
@@ -5428,13 +5426,16 @@ control_event_hs_descriptor_content(const char *onion_address,
   static const char *event_name = "HS_DESC_CONTENT";
   char *esc_content = NULL;
 
-  if (!onion_address || !desc_id || !hsdir_id_digest || !content) {
+  if (!onion_address || !desc_id || !hsdir_id_digest) {
     log_warn(LD_BUG, "Called with onion_address==%p, desc_id==%p, "
-             "hsdir_id_digest==%p, content==%p", onion_address, desc_id,
-             hsdir_id_digest, content);
+             "hsdir_id_digest==%p", onion_address, desc_id, hsdir_id_digest);
     return;
   }
 
+  if (content == NULL) {
+    /* Point it to empty content so it can still be escaped. */
+    content = "";
+  }
   write_escaped_data(content, strlen(content), &esc_content);
 
   send_control_event(EVENT_HS_DESC_CONTENT, ALL_FORMATS,
