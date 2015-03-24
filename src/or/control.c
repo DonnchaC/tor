@@ -37,6 +37,8 @@
 #include "nodelist.h"
 #include "policies.h"
 #include "reasons.h"
+#include "rendcommon.h"
+#include "rendservice.h"
 #include "rephist.h"
 #include "router.h"
 #include "routerlist.h"
@@ -3219,15 +3221,19 @@ handle_control_hspost(control_connection_t *conn,
                       uint32_t len,
                       const char *body)
 {
-  rend_service_descriptor_t *parsed;
-  char desc_id[DIGEST_LEN];
-  char *cp, *desc;
+  rend_service_descriptor_t *parsed = NULL;
+  rend_encoded_v2_service_descriptor_t *desc =
+      tor_malloc_zero(sizeof(rend_encoded_v2_service_descriptor_t));
+  char *cp;
   char *intro_content;
   size_t intro_size;
   size_t encoded_size;
   const char *next_desc;
+  char serviceid[REND_SERVICE_ID_LEN_BASE32+1];
 
-  smartlist_t *args = smartlist_new(), *hsdirs = smartlist_new();
+  smartlist_t *args = smartlist_new();
+  smartlist_t *hs_dirs = NULL;
+  smartlist_t *descs = smartlist_new();
   static const char *opt_server = "SERVER=";
 
   /* If any SERVER= options were specified, try parse the options line */
@@ -3236,10 +3242,11 @@ handle_control_hspost(control_connection_t *conn,
     cp = memchr(body, '\n', len);
     *cp++ = '\0';
 
+    /* Control command can accept 0 or more arguments */
     args = getargs_helper("+HSPOST", conn, body, 0, -1);
 
     /** Parse each server fingeprint from the options **/
-    SMARTLIST_FOREACH_BEGIN(args, char *, arg) {
+    SMARTLIST_FOREACH_BEGIN(args, const char *, arg) {
       const node_t *node;
 
       if (!strcasecmpstart(arg, opt_server)) {
@@ -3252,8 +3259,15 @@ handle_control_hspost(control_connection_t *conn,
                                    server);
           goto done;
         }
+        if(!node->rs->is_hs_dir) {
+          connection_printf_to_buf(conn, "552 Server \"%s\" is not a HSDir"
+                                         "\r\n", server);
+          goto done;
+        }
         /* Valid server, add it to our local list. */
-        smartlist_add(hsdirs, node->rs);
+        if(!hs_dirs)
+          hs_dirs = smartlist_new();
+        smartlist_add(hs_dirs, node->rs);
       } else {
         connection_printf_to_buf(conn, "552 Unexpected argument \"%s\"\r\n",
                                  arg);
@@ -3264,59 +3278,35 @@ handle_control_hspost(control_connection_t *conn,
     /* No options were specified, descriptor should begin on the first line */
     cp = (char*) body;
   }
-  read_escaped_data(cp, len-(cp-body), &desc);
+
+  read_escaped_data(cp, len-(cp-body), &desc->desc_str);
 
   /* Check that the descriptor can be parsed */
-  if (rend_parse_v2_service_descriptor(&parsed, desc_id, &intro_content,
+  if (rend_parse_v2_service_descriptor(&parsed, desc->desc_id, &intro_content,
                                        &intro_size, &encoded_size,
-                                       &next_desc, desc, 1) < 0) {
-    connection_printf_to_buf(conn, "554 Invalid descriptor\r\n");
-    goto done;
+                                       &next_desc, desc->desc_str, 1) < 0) {
+     connection_printf_to_buf(conn, "554 Invalid descriptor\r\n");
+     goto done;
   }
 
-  /* We don't care about the introduction points or parsed descriptor. */
+  /* We don't care about the introduction points. */
   tor_free(intro_content);
-  tor_free(parsed);
+  smartlist_add(descs, desc);
+  rend_get_service_id(parsed->pk, serviceid);
 
-  /** If the hsdir list is empty, determine the set of responsible HS
-   * directories */
-  if (!hsdirs || smartlist_len(hsdirs) == 0){
-    if (hid_serv_get_responsible_directories(hsdirs,
-                                             desc_id) < 0) {
-      connection_printf_to_buf(conn, "552 Could not determine the responsible "
-                                     "hidden service directories\r\n");
-      goto done;
-    }
-  }
-
-  /* We are about to trigger HSDir upload so send the OK now because after
-   * that 650 event(s) are possible so better to have the 250 OK before them
-   * to avoid out of order replies. */
+  /* We are about to trigger HS descriptor upload so send the OK now
+   * because after that 650 event(s) are possible so better to have the
+   * 250 OK before them to avoid out of order replies. */
   send_control_done(conn);
 
-  /* Trigger the fetch using the built rend query and possibly a list of HS
-   * directory to use. */
-
-  SMARTLIST_FOREACH_BEGIN(hsdirs, routerstatus_t *, hsdir) {
-    /* Send upload to each specified HSDir. */
-    directory_initiate_command_routerstatus(hsdir,
-                                            DIR_PURPOSE_UPLOAD_RENDDESC_V2,
-                                            ROUTER_PURPOSE_GENERAL,
-                                            DIRIND_ANONYMOUS, NULL,
-                                            desc,
-                                            strlen(desc), 0);
-  } SMARTLIST_FOREACH_END(hsdir);
+  /* Trigger the descriptor upload */
+  directory_post_to_hs_dir(parsed, descs, hs_dirs, serviceid, 0);
 
  done:
   if(args){
     SMARTLIST_FOREACH(args, char *, arg, tor_free(arg));
     smartlist_free(args);
   }
-  if(hsdirs){
-    SMARTLIST_FOREACH(hsdirs, routerstatus_t *, hsdir, tor_free(hsdir));
-    smartlist_free(hsdirs);
-  }
-  // tor_free(desc);
   return 0;
 }
 
