@@ -101,5 +101,9 @@ int rend_service_set_connection_addr_port(edge_connection_t *conn,
 void rend_service_dump_stats(int severity);
 void rend_service_free_all(void);
 
+void directory_post_to_hs_dir(rend_service_descriptor_t *renddesc,
+                              smartlist_t *descs, smartlist_t *hs_dirs,
+                              const char *service_id, int seconds_valid);
+
 #endif
 
