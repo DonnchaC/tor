@@ -3233,7 +3233,7 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
   /* Make sure we have at least one argument, the HSAddress. */
   args = getargs_helper(hsfetch_command, conn, body, 1, -1);
   if (!args) {
-    goto done;
+    goto exit;
   }
 
   /* Extract the first argument (either HSAddress or DescID). */
@@ -3254,11 +3254,12 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
     goto done;
   }
 
+  static const char *opt_server = "SERVER=";
+
   /* Skip first argument because it's the HSAddress or DescID. */
   for (i = 1; i < smartlist_len(args); ++i) {
     const char *arg = smartlist_get(args, i);
     const node_t *node;
-    static const char *opt_server = "SERVER=";
 
     if (!strcasecmpstart(arg, opt_server)) {
       const char *server;
@@ -3313,12 +3314,12 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
   rend_client_fetch_v2_desc(rend_query, hsdirs);
 
 done:
+  SMARTLIST_FOREACH(args, char *, cp, tor_free(cp));
+  smartlist_free(args);
+  /* Contains data pointer that we don't own thus no cleanup. */
   smartlist_free(hsdirs);
-  if (args) {
-    SMARTLIST_FOREACH(args, char *, cp, tor_free(cp));
-    smartlist_free(args);
-  }
   tor_free(rend_query);
+exit:
   return 0;
 }
 
