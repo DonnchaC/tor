@@ -3221,6 +3221,7 @@ static int
 handle_control_hsfetch(control_connection_t *conn, uint32_t len,
                        const char *body)
 {
+  int i;
   char digest[DIGEST_LEN], *hsaddress = NULL, *arg1 = NULL, *desc_id = NULL;
   smartlist_t *args = NULL, *hsdirs = NULL;
   (void) len; /* body is nul-terminated; it's safe to ignore the length */
@@ -3236,9 +3237,6 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
 
   /* Extract the first argument (either HSAddress or DescID). */
   arg1 = smartlist_get(args, 0);
-  /* Remove it from the argument list so we can safely iterate on all the
-   * rest to find optional argument(s). */
-  smartlist_del(args, 0);
   /* Test if it's an HS address without the .onion part. */
   if (rend_valid_service_id(arg1)) {
     hsaddress = arg1;
@@ -3255,8 +3253,9 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
     goto done;
   }
 
-  /* Skip first argument because it's the HSAddress. */
-  SMARTLIST_FOREACH_BEGIN(args, char *, arg) {
+  /* Skip first argument because it's the HSAddress or DescID. */
+  for (i = 1; i < smartlist_len(args); ++i) {
+    const char *arg = smartlist_get(args, i);
     const node_t *node;
     static const char *opt_server = "SERVER=";
 
@@ -3281,7 +3280,7 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
                                arg);
       goto done;
     }
-  } SMARTLIST_FOREACH_END(arg);
+  }
 
   rend_query = tor_malloc_zero(sizeof(*rend_query));
 
@@ -3318,7 +3317,6 @@ done:
     smartlist_free(args);
   }
   tor_free(rend_query);
-  tor_free(arg1);
   return 0;
 }
 
