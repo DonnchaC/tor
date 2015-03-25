@@ -5304,6 +5304,31 @@ control_event_hs_descriptor_requested(const rend_data_t *rend_query,
                      desc_id_base32);
 }
 
+/** send HS_DESC upload event.
+ *
+ * <b>service_id</b> is the descriptor onion address.
+ * <b>hs_dir</b> is the description of contacting hs directory.
+ * <b>desc_id_base32</b> is the ID of requested hs descriptor.
+ */
+void
+control_event_hs_descriptor_upload(const char *service_id,
+                                   const char *id_digest,
+                                   const char *desc_id_base32)
+{
+  if (!!service_id || !id_digest || !desc_id_base32) {
+    log_warn(LD_BUG, "Called with service_digest==%p, "
+             "desc_id_base32==%p, id_digest==%p", service_id,
+             desc_id_base32, id_digest);
+    return;
+  }
+
+  send_control_event(EVENT_HS_DESC, ALL_FORMATS,
+                     "650 HS_DESC UPLOAD %s %s %s\r\n",
+                     service_id,
+                     node_describe_longname_by_id(id_digest),
+                     desc_id_base32);
+}
+
 /** send HS_DESC event after got response from hs directory.
  *
  * NOTE: this is an internal function used by following functions:
@@ -5341,9 +5366,43 @@ control_event_hs_descriptor_receive_end(const char *action,
   tor_free(reason_field);
 }
 
+/** send HS_DESC event after got response from hs directory.
+ *
+ * NOTE: this is an internal function used by following functions:
+ * control_event_hs_descriptor_uploaded
+ * control_event_hs_descriptor_upload_failed
+ *
+ * So do not call this function directly.
+ */
+void
+control_event_hs_descriptor_upload_end(const char *action,
+                                       const char *id_digest,
+                                       const char *reason)
+{
+  char *reason_field = NULL;
+
+  if (!action || !id_digest) {
+    log_warn(LD_BUG, "Called with action==%p, id_digest==%p", action,
+             id_digest);
+    return;
+  }
+
+  if (reason) {
+    tor_asprintf(&reason_field, " REASON=%s", reason);
+  }
+
+  send_control_event(EVENT_HS_DESC, ALL_FORMATS,
+                     "650 HS_DESC %s %s%s\r\n",
+                     action,
+                     node_describe_longname_by_id(id_digest),
+                     reason_field ? reason_field : "");
+
+  tor_free(reason_field);
+}
+
 /** send HS_DESC RECEIVED event
  *
- * called when a we successfully received a hidden service descriptor.
+ * called when we successfully received a hidden service descriptor.
  */
 void
 control_event_hs_descriptor_received(const rend_data_t *rend_query,
@@ -5356,6 +5415,21 @@ control_event_hs_descriptor_received(const rend_data_t *rend_query,
   }
   control_event_hs_descriptor_receive_end("RECEIVED", rend_query,
                                           id_digest, NULL);
+}
+
+/** send HS_DESC UPLOADED event
+ *
+ * called when we successfully uploaded a hidden service descriptor.
+ */
+void
+control_event_hs_descriptor_uploaded(const char *id_digest)
+{
+  if (!id_digest) {
+    log_warn(LD_BUG, "Called with id_digest==%p",
+             id_digest);
+    return;
+  }
+  control_event_hs_descriptor_upload_end("UPLOADED", id_digest, NULL);
 }
 
 /** Send HS_DESC event to inform controller that query <b>rend_query</b>
@@ -5375,6 +5449,23 @@ control_event_hs_descriptor_failed(const rend_data_t *rend_query,
   }
   control_event_hs_descriptor_receive_end("FAILED", rend_query,
                                           id_digest, reason);
+}
+
+/** Send HS_DESC event to inform controller upload of hidden service
+ * descriptor identified by <b>id_digest</b> failed. If <b>reason</b>
+ * is not NULL, add it to REASON= field.
+ */
+void
+control_event_hs_descriptor_upload_failed(const char *id_digest,
+                                          const char *reason)
+{
+  if (!id_digest) {
+    log_warn(LD_BUG, "Called with id_digest==%p",
+             id_digest);
+    return;
+  }
+  control_event_hs_descriptor_upload_end("UPLOAD_FAILED",
+                                         id_digest, reason);
 }
 
 /** Free any leftover allocated memory of the control.c subsystem. */

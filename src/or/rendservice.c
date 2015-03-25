@@ -15,6 +15,7 @@
 #include "circuitlist.h"
 #include "circuituse.h"
 #include "config.h"
+#include "control.h"
 #include "directory.h"
 #include "main.h"
 #include "networkstatus.h"
@@ -2947,6 +2948,9 @@ directory_post_to_hs_dir(rend_service_descriptor_t *renddesc,
                hs_dir->nickname,
                hs_dir_ip,
                hs_dir->or_port);
+      control_event_hs_descriptor_upload(service_id,
+                                         hs_dir->identity_digest,
+                                         desc_id_base32);
       tor_free(hs_dir_ip);
       /* Remember successful upload to this router for next time. */
       if (!smartlist_contains_digest(successful_uploads,
