@@ -3225,12 +3225,13 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
   char digest[DIGEST_LEN], *hsaddress = NULL, *arg1 = NULL, *desc_id = NULL;
   smartlist_t *args = NULL, *hsdirs = NULL;
   (void) len; /* body is nul-terminated; it's safe to ignore the length */
+  static const char *hsfetch_command = "HSFETCH";
   static const char *v2_str = "v2-";
   const size_t v2_str_len = strlen(v2_str);
   rend_data_t *rend_query = NULL;
 
   /* Make sure we have at least one argument, the HSAddress. */
-  args = getargs_helper("HSFETCH", conn, body, 1, -1);
+  args = getargs_helper(hsfetch_command, conn, body, 1, -1);
   if (!args) {
     goto done;
   }
@@ -3291,7 +3292,8 @@ handle_control_hsfetch(control_connection_t *conn, uint32_t len,
     /* Using a descriptor ID, we force the user to provide at least one
      * hsdir server using the SERVER= option. */
     if (!hsdirs || !smartlist_len(hsdirs)) {
-      connection_printf_to_buf(conn, "512 SERVER= option is required\r\n");
+      connection_printf_to_buf(conn, "512 %s option is required\r\n",
+                               opt_server);
       goto done;
     }
     memcpy(rend_query->descriptor_id, desc_id,
