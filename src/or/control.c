@@ -5326,7 +5326,7 @@ control_event_hs_descriptor_upload(const char *service_id,
                                    const char *id_digest,
                                    const char *desc_id_base32)
 {
-  if (!!service_id || !id_digest || !desc_id_base32) {
+  if (!service_id || !id_digest || !desc_id_base32) {
     log_warn(LD_BUG, "Called with service_digest==%p, "
              "desc_id_base32==%p, id_digest==%p", service_id,
              desc_id_base32, id_digest);
