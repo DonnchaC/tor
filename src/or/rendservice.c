@@ -2898,6 +2898,7 @@ directory_post_to_hs_dir(rend_service_descriptor_t *renddesc,
     /** If any HSDirs are specified, they should be used instead of
      *  the responsible directories */
     if (hs_dirs && smartlist_len(hs_dirs) > 0){
+      tor_free(responsible_dirs);
       responsible_dirs = hs_dirs;
     } else {
       /* Determine responsible dirs. */

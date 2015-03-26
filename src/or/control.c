@@ -3307,6 +3307,17 @@ handle_control_hspost(control_connection_t *conn,
     SMARTLIST_FOREACH(args, char *, arg, tor_free(arg));
     smartlist_free(args);
   }
+  if(hs_dirs){
+    /** Don't free hsdir items as they are routerstatus entries */
+    smartlist_free(hs_dirs);
+  }
+  if(parsed)
+    rend_service_descriptor_free(parsed);
+  if(descs){
+    for (int i = 0; i < smartlist_len(descs); i++)
+      rend_encoded_v2_service_descriptor_free(smartlist_get(descs, i));
+    smartlist_free(descs);
+  }
   return 0;
 }
 
