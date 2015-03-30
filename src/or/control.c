@@ -3221,39 +3221,32 @@ handle_control_hspost(control_connection_t *conn,
                       uint32_t len,
                       const char *body)
 {
-  rend_service_descriptor_t *parsed = NULL;
-  rend_encoded_v2_service_descriptor_t *desc =
-      tor_malloc_zero(sizeof(rend_encoded_v2_service_descriptor_t));
-  char *cp;
-  char *intro_content;
-  size_t intro_size;
-  size_t encoded_size;
-  const char *next_desc;
-  char serviceid[REND_SERVICE_ID_LEN_BASE32+1];
-
+  static const char *opt_server = "SERVER=";
   smartlist_t *args = smartlist_new();
   smartlist_t *hs_dirs = NULL;
-  smartlist_t *descs = smartlist_new();
-  static const char *opt_server = "SERVER=";
+  const char *encoded_desc = body;
+  size_t encoded_desc_len = len;
+
+  char *cp = memchr(body, '\n', len);
+  char *argline = tor_strndup(body, cp-body);
 
   /* If any SERVER= options were specified, try parse the options line */
-  if (!strcasecmpstart(body, opt_server)) {
-    /* Set cp to start of the descriptor content */
-    cp = memchr(body, '\n', len);
-    *cp++ = '\0';
+  if (!strcasecmpstart(argline, opt_server)) {
+    /* Remove the first line and update the descriptor string location. */
+    if (argline == NULL)
+      goto done;
+    /* encoded_desc begins after a newline character */
+    cp = cp + 1;
+    encoded_desc = cp;
+    encoded_desc_len = len-(cp-body);
 
-    /* Control command can accept 0 or more arguments */
-    args = getargs_helper("+HSPOST", conn, body, 0, -1);
-
-    /** Parse each server fingeprint from the options **/
+    smartlist_split_string(args, argline, " ",
+                           SPLIT_SKIP_SPACE|SPLIT_IGNORE_BLANK, 0);
     SMARTLIST_FOREACH_BEGIN(args, const char *, arg) {
-      const node_t *node;
-
       if (!strcasecmpstart(arg, opt_server)) {
-        const char *server;
-        server = arg + strlen(opt_server);
+        const char *server = arg + strlen(opt_server);
+        const node_t *node = node_get_by_hex_id(server);
 
-        node = node_get_by_hex_id(server);
         if (!node) {
           connection_printf_to_buf(conn, "552 Server \"%s\" not found\r\n",
                                    server);
@@ -3265,7 +3258,7 @@ handle_control_hspost(control_connection_t *conn,
           goto done;
         }
         /* Valid server, add it to our local list. */
-        if(!hs_dirs)
+        if (!hs_dirs)
           hs_dirs = smartlist_new();
         smartlist_add(hs_dirs, node->rs);
       } else {
@@ -3274,43 +3267,55 @@ handle_control_hspost(control_connection_t *conn,
         goto done;
       }
     } SMARTLIST_FOREACH_END(arg);
+  }
+
+  /* Read the dot encoded descriptor, and parse it. */
+  rend_encoded_v2_service_descriptor_t *desc =
+      tor_malloc_zero(sizeof(rend_encoded_v2_service_descriptor_t));
+  read_escaped_data(encoded_desc, encoded_desc_len, &desc->desc_str);
+
+  rend_service_descriptor_t *parsed = NULL;
+  char *intro_content;
+  size_t intro_size;
+  size_t encoded_size;
+  const char *next_desc;
+  if (!rend_parse_v2_service_descriptor(&parsed, desc->desc_id, &intro_content,
+                                        &intro_size, &encoded_size,
+                                        &next_desc, desc->desc_str, 1)) {
+    tor_free(intro_content);
+
+    /* Post the descriptor. */
+    char serviceid[REND_SERVICE_ID_LEN_BASE32+1];
+    if (!rend_get_service_id(parsed->pk, serviceid)) {
+      smartlist_t *descs = smartlist_new();
+      smartlist_add(descs, desc);
+      desc = NULL; /* The descs list cleanup frees this. */
+
+      /* We are about to trigger HS descriptor upload so send the OK now
+       * because after that 650 event(s) are possible so better to have the
+       * 250 OK before them to avoid out of order replies. */
+      send_control_done(conn);
+
+      /* Trigger the descriptor upload */
+      directory_post_to_hs_dir(parsed, descs, hs_dirs, serviceid, 0);
+
+      SMARTLIST_FOREACH(descs, rend_encoded_v2_service_descriptor_t *, d, {
+        rend_encoded_v2_service_descriptor_free(d);
+      });
+      smartlist_free(descs);
+    }
+
+    rend_service_descriptor_free(parsed);
   } else {
-    /* No options were specified, descriptor should begin on the first line */
-    cp = (char*) body;
+    connection_printf_to_buf(conn, "554 Invalid descriptor\r\n");
   }
 
-  read_escaped_data(cp, len-(cp-body), &desc->desc_str);
-
-  /* Check that the descriptor can be parsed */
-  if (rend_parse_v2_service_descriptor(&parsed, desc->desc_id, &intro_content,
-                                       &intro_size, &encoded_size,
-                                       &next_desc, desc->desc_str, 1) < 0) {
-     connection_printf_to_buf(conn, "554 Invalid descriptor\r\n");
-     goto done;
-  }
-
-  /* We don't care about the introduction points. */
-  tor_free(intro_content);
-  smartlist_add(descs, desc);
-  rend_get_service_id(parsed->pk, serviceid);
-
-  /* We are about to trigger HS descriptor upload so send the OK now
-   * because after that 650 event(s) are possible so better to have the
-   * 250 OK before them to avoid out of order replies. */
-  send_control_done(conn);
-
-  /* Trigger the descriptor upload */
-  directory_post_to_hs_dir(parsed, descs, hs_dirs, serviceid, 0);
-
- done:
+  rend_encoded_v2_service_descriptor_free(desc);
+done:
+  tor_free(argline);
+  smartlist_free(hs_dirs); /* Contents belong to the rend service code. */
   SMARTLIST_FOREACH(args, char *, arg, tor_free(arg));
   smartlist_free(args);
-  /** Don't free hsdir items as they are routerstatus entries */
-  smartlist_free(hs_dirs);
-  rend_service_descriptor_free(parsed);
-  for (int i = 0; i < smartlist_len(descs); i++)
-    rend_encoded_v2_service_descriptor_free(smartlist_get(descs, i));
-  smartlist_free(descs);
   return 0;
 }
 
