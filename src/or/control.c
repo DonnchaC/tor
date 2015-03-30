@@ -5401,7 +5401,7 @@ control_event_hs_descriptor_upload_end(const char *action,
   }
 
   send_control_event(EVENT_HS_DESC, ALL_FORMATS,
-                     "650 HS_DESC %s UNKNOWN UNKNOWN %s %s%s\r\n",
+                     "650 HS_DESC %s UNKNOWN UNKNOWN %s%s\r\n",
                      action,
                      node_describe_longname_by_id(id_digest),
                      reason_field ? reason_field : "");
