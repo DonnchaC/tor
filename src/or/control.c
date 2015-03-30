@@ -3232,9 +3232,6 @@ handle_control_hspost(control_connection_t *conn,
 
   /* If any SERVER= options were specified, try parse the options line */
   if (!strcasecmpstart(argline, opt_server)) {
-    /* Remove the first line and update the descriptor string location. */
-    if (argline == NULL)
-      goto done;
     /* encoded_desc begins after a newline character */
     cp = cp + 1;
     encoded_desc = cp;
