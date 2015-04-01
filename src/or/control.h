@@ -106,6 +106,9 @@ MOCK_DECL(const char *, node_describe_longname_by_id,(const char *id_digest));
 void control_event_hs_descriptor_requested(const rend_data_t *rend_query,
                                            const char *desc_id_base32,
                                            const char *hs_dir);
+void control_event_hs_descriptor_upload(const char *service_id,
+                                        const char *desc_id_base32,
+                                        const char *hs_dir);
 void control_event_hs_descriptor_receive_end(const char *action,
                                              const char *onion_address,
                                              rend_auth_type_t auth_type,
@@ -122,6 +125,12 @@ void control_event_hs_descriptor_content(const char *onion_address,
                                          const char *desc_id,
                                          const char *hsdir_fp,
                                          const char *content);
+void control_event_hs_descriptor_upload_end(const char *action,
+                                            const char *hs_dir,
+                                            const char *reason);
+void control_event_hs_descriptor_uploaded(const char *hs_dir);
+void control_event_hs_descriptor_upload_failed(const char *hs_dir,
+                                               const char *reason);
 
 void control_free_all(void);
 
