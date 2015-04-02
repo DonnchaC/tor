@@ -3259,7 +3259,7 @@ handle_control_hspost(control_connection_t *conn,
           hs_dirs = smartlist_new();
         smartlist_add(hs_dirs, node->rs);
       } else {
-        connection_printf_to_buf(conn, "552 Unexpected argument \"%s\"\r\n",
+        connection_printf_to_buf(conn, "512 Unexpected argument \"%s\"\r\n",
                                  arg);
         goto done;
       }
@@ -3272,21 +3272,18 @@ handle_control_hspost(control_connection_t *conn,
   read_escaped_data(encoded_desc, encoded_desc_len, &desc->desc_str);
 
   rend_service_descriptor_t *parsed = NULL;
-  char *intro_content;
+  char *intro_content = NULL;
   size_t intro_size;
   size_t encoded_size;
   const char *next_desc;
   if (!rend_parse_v2_service_descriptor(&parsed, desc->desc_id, &intro_content,
                                         &intro_size, &encoded_size,
                                         &next_desc, desc->desc_str, 1)) {
-    tor_free(intro_content);
-
     /* Post the descriptor. */
     char serviceid[REND_SERVICE_ID_LEN_BASE32+1];
     if (!rend_get_service_id(parsed->pk, serviceid)) {
       smartlist_t *descs = smartlist_new();
       smartlist_add(descs, desc);
-      desc = NULL; /* The descs list cleanup frees this. */
 
       /* We are about to trigger HS descriptor upload so send the OK now
        * because after that 650 event(s) are possible so better to have the
@@ -3295,10 +3292,6 @@ handle_control_hspost(control_connection_t *conn,
 
       /* Trigger the descriptor upload */
       directory_post_to_hs_dir(parsed, descs, hs_dirs, serviceid, 0);
-
-      SMARTLIST_FOREACH(descs, rend_encoded_v2_service_descriptor_t *, d, {
-        rend_encoded_v2_service_descriptor_free(d);
-      });
       smartlist_free(descs);
     }
 
@@ -3307,6 +3300,7 @@ handle_control_hspost(control_connection_t *conn,
     connection_printf_to_buf(conn, "554 Invalid descriptor\r\n");
   }
 
+  tor_free(intro_content);
   rend_encoded_v2_service_descriptor_free(desc);
 done:
   tor_free(argline);

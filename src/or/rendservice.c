@@ -2906,6 +2906,9 @@ directory_post_to_hs_dir(rend_service_descriptor_t *renddesc,
                                                desc->desc_id) < 0) {
         log_warn(LD_REND, "Could not determine the responsible hidden service "
                           "directories to post descriptors to.");
+        control_event_hs_descriptor_upload(service_id,
+                                           "UNKNOWN",
+                                           "UNKNOWN");
         smartlist_free(responsible_dirs);
         smartlist_free(successful_uploads);
         return;
