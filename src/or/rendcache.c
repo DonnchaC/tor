@@ -243,6 +243,42 @@ rend_cache_lookup_entry(const char *query, int version, rend_cache_entry_t **e)
   return ret;
 }
 
+/*
+ * Lookup the v2 service descriptor with the service ID <b>query</b> in the
+ * local service descriptor cache. Return 0 if found and if <b>e</b> is
+ * non NULL, set it with the entry found. Else, a negative value is returned
+ * and <b>e</b> is untouched.
+ * -EINVAL means that <b>query</b> is not a valid service id.
+ * -ENOENT means that no entry in the cache was found. */
+int
+rend_cache_lookup_v2_desc_as_service(const char *query, rend_cache_entry_t **e)
+{
+  int ret = 0;
+  rend_cache_entry_t *entry = NULL;
+
+  tor_assert(rend_cache_service);
+  tor_assert(query);
+
+  if (!rend_valid_service_id(query)) {
+    ret = -EINVAL;
+    goto end;
+  }
+
+  /* Lookup descriptor and return. */
+  entry = strmap_get_lc(rend_cache_service, query);
+  if (!entry) {
+    ret = -ENOENT;
+    goto end;
+  }
+
+  if (e) {
+    *e = entry;
+  }
+
+ end:
+  return ret;
+}
+
 /** Lookup the v2 service descriptor with base32-encoded <b>desc_id</b> and
  * copy the pointer to it to *<b>desc</b>.  Return 1 on success, 0 on
  * well-formed-but-not-found, and -1 on failure.
@@ -270,33 +306,6 @@ rend_cache_lookup_v2_desc_as_dir(const char *desc_id, const char **desc)
   }
   return 0;
 }
-
-/** Lookup the v2 service descriptor with the service ID <b>query</b> in the
- * local service descriptor cache and copy the pointer to it to *<b>desc</b>.
- * Return 1 on success, 0 on well-formed-but-not-found, and -1 on failure.
- */
-int
-rend_cache_lookup_v2_desc_as_service(const char *query, const char **desc)
-{
-  rend_cache_entry_t *e = NULL;
-
-  tor_assert(rend_cache_service);
-  tor_assert(query);
-
-  if (!rend_valid_service_id(query)) {
-    log_warn(LD_REND, "Rejecting service cache lookup - invalid service ID.");
-    return -1;
-  }
-
-  /* Lookup descriptor and return. */
-  e = strmap_get_lc(rend_cache_service, query);
-  if (e) {
-    *desc = e->desc;
-    return 1;
-  }
-  return 0;
-}
-
 
 /** Parse the v2 service descriptor(s) in <b>desc</b> and store it/them to the
  * local rend cache. Don't attempt to decrypt the included list of introduction
