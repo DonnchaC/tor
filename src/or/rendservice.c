@@ -23,6 +23,7 @@
 #include "rendclient.h"
 #include "rendcommon.h"
 #include "rendservice.h"
+#include "rendcache.h"
 #include "router.h"
 #include "relay.h"
 #include "rephist.h"
@@ -3211,43 +3212,85 @@ upload_service_descriptor(rend_service_t *service)
   time_t now = time(NULL);
   int rendpostperiod;
   char serviceid[REND_SERVICE_ID_LEN_BASE32+1];
+  char desc_id_base32[REND_DESC_ID_V2_LEN_BASE32 + 1];
   int uploaded = 0;
 
   rendpostperiod = get_options()->RendPostPeriod;
 
-  /* Upload descriptor? */
-  if (get_options()->PublishHidServDescriptors) {
-    networkstatus_t *c = networkstatus_get_latest_consensus();
-    if (c && smartlist_len(c->routerstatus_list) > 0) {
-      int seconds_valid, i, j, num_descs;
-      smartlist_t *descs = smartlist_new();
-      smartlist_t *client_cookies = smartlist_new();
-      /* Either upload a single descriptor (including replicas) or one
-       * descriptor for each authorized client in case of authorization
-       * type 'stealth'. */
-      num_descs = service->auth_type == REND_STEALTH_AUTH ?
-                      smartlist_len(service->clients) : 1;
-      for (j = 0; j < num_descs; j++) {
-        crypto_pk_t *client_key = NULL;
-        rend_authorized_client_t *client = NULL;
-        smartlist_clear(client_cookies);
-        switch (service->auth_type) {
-          case REND_NO_AUTH:
-            /* Do nothing here. */
-            break;
-          case REND_BASIC_AUTH:
-            SMARTLIST_FOREACH(service->clients, rend_authorized_client_t *,
-                cl, smartlist_add(client_cookies, cl->descriptor_cookie));
-            break;
-          case REND_STEALTH_AUTH:
-            client = smartlist_get(service->clients, j);
-            client_key = client->client_key;
-            smartlist_add(client_cookies, client->descriptor_cookie);
-            break;
-        }
-        /* Encode the current descriptor. */
+  networkstatus_t *c = networkstatus_get_latest_consensus();
+  if (c && smartlist_len(c->routerstatus_list) > 0) {
+    int seconds_valid, i, j, num_descs;
+    smartlist_t *descs = smartlist_new();
+    smartlist_t *client_cookies = smartlist_new();
+    /* Either upload a single descriptor (including replicas) or one
+     * descriptor for each authorized client in case of authorization
+     * type 'stealth'. */
+    num_descs = service->auth_type == REND_STEALTH_AUTH ?
+                    smartlist_len(service->clients) : 1;
+    for (j = 0; j < num_descs; j++) {
+      crypto_pk_t *client_key = NULL;
+      rend_authorized_client_t *client = NULL;
+      smartlist_clear(client_cookies);
+      switch (service->auth_type) {
+        case REND_NO_AUTH:
+          /* Do nothing here. */
+          break;
+        case REND_BASIC_AUTH:
+          SMARTLIST_FOREACH(service->clients, rend_authorized_client_t *,
+              cl, smartlist_add(client_cookies, cl->descriptor_cookie));
+          break;
+        case REND_STEALTH_AUTH:
+          client = smartlist_get(service->clients, j);
+          client_key = client->client_key;
+          smartlist_add(client_cookies, client->descriptor_cookie);
+          break;
+      }
+      /* Encode the current descriptor. */
+      seconds_valid = rend_encode_v2_descriptors(descs, service->desc,
+                                                 now, 0,
+                                                 service->auth_type,
+                                                 client_key,
+                                                 client_cookies);
+      if (seconds_valid < 0) {
+        log_warn(LD_BUG, "Internal error: couldn't encode service "
+                 "descriptor; not uploading.");
+        smartlist_free(descs);
+        smartlist_free(client_cookies);
+        return;
+      }
+      rend_get_service_id(service->desc->pk, serviceid);
+      /* Add the uploaded descriptor to the local service's descriptor cache */
+      for (i = 0; i < smartlist_len(descs); i++) {
+        rend_encoded_v2_service_descriptor_t *desc = smartlist_get(descs, i);
+        rend_cache_store_v2_desc_as_service(desc->desc_str);
+        base32_encode(desc_id_base32, sizeof(desc_id_base32),
+              desc->desc_id, DIGEST_LEN);
+        control_event_hs_descriptor_created(serviceid, desc_id_base32);
+      }
+      if (get_options()->PublishHidServDescriptors) {
+        /* Post the current descriptors to the hidden service directories. */
+        log_info(LD_REND, "Launching upload for hidden service %s",
+                     serviceid);
+        directory_post_to_hs_dir(service->desc, descs, NULL, serviceid,
+                                 seconds_valid);
+      }
+      /* Free memory for descriptors. */
+      for (i = 0; i < smartlist_len(descs); i++)
+        rend_encoded_v2_service_descriptor_free(smartlist_get(descs, i));
+      smartlist_clear(descs);
+      /* Update next upload time. */
+      if (seconds_valid - REND_TIME_PERIOD_OVERLAPPING_V2_DESCS
+          > rendpostperiod)
+        service->next_upload_time = now + rendpostperiod;
+      else if (seconds_valid < REND_TIME_PERIOD_OVERLAPPING_V2_DESCS)
+        service->next_upload_time = now + seconds_valid + 1;
+      else
+        service->next_upload_time = now + seconds_valid -
+            REND_TIME_PERIOD_OVERLAPPING_V2_DESCS + 1;
+      /* Post also the next descriptors, if necessary. */
+      if (seconds_valid < REND_TIME_PERIOD_OVERLAPPING_V2_DESCS) {
         seconds_valid = rend_encode_v2_descriptors(descs, service->desc,
-                                                   now, 0,
+                                                   now, 1,
                                                    service->auth_type,
                                                    client_key,
                                                    client_cookies);
@@ -3258,51 +3301,30 @@ upload_service_descriptor(rend_service_t *service)
           smartlist_free(client_cookies);
           return;
         }
-        /* Post the current descriptors to the hidden service directories. */
-        rend_get_service_id(service->desc->pk, serviceid);
-        log_info(LD_REND, "Launching upload for hidden service %s",
-                     serviceid);
-        directory_post_to_hs_dir(service->desc, descs, NULL, serviceid,
-                                 seconds_valid);
+        if (get_options()->PublishHidServDescriptors) {
+          directory_post_to_hs_dir(service->desc, descs, NULL, serviceid,
+                                   seconds_valid);
+        }
+        for (i = 0; i < smartlist_len(descs); i++) {
+          rend_encoded_v2_service_descriptor_t *desc = smartlist_get(descs, i);
+          rend_cache_store_v2_desc_as_service(desc->desc_str);
+          base32_encode(desc_id_base32, sizeof(desc_id_base32),
+                desc->desc_id, DIGEST_LEN);
+          control_event_hs_descriptor_created(serviceid, desc_id_base32);
+        }
         /* Free memory for descriptors. */
         for (i = 0; i < smartlist_len(descs); i++)
           rend_encoded_v2_service_descriptor_free(smartlist_get(descs, i));
         smartlist_clear(descs);
-        /* Update next upload time. */
-        if (seconds_valid - REND_TIME_PERIOD_OVERLAPPING_V2_DESCS
-            > rendpostperiod)
-          service->next_upload_time = now + rendpostperiod;
-        else if (seconds_valid < REND_TIME_PERIOD_OVERLAPPING_V2_DESCS)
-          service->next_upload_time = now + seconds_valid + 1;
-        else
-          service->next_upload_time = now + seconds_valid -
-              REND_TIME_PERIOD_OVERLAPPING_V2_DESCS + 1;
-        /* Post also the next descriptors, if necessary. */
-        if (seconds_valid < REND_TIME_PERIOD_OVERLAPPING_V2_DESCS) {
-          seconds_valid = rend_encode_v2_descriptors(descs, service->desc,
-                                                     now, 1,
-                                                     service->auth_type,
-                                                     client_key,
-                                                     client_cookies);
-          if (seconds_valid < 0) {
-            log_warn(LD_BUG, "Internal error: couldn't encode service "
-                     "descriptor; not uploading.");
-            smartlist_free(descs);
-            smartlist_free(client_cookies);
-            return;
-          }
-          directory_post_to_hs_dir(service->desc, descs, NULL, serviceid,
-                                   seconds_valid);
-          /* Free memory for descriptors. */
-          for (i = 0; i < smartlist_len(descs); i++)
-            rend_encoded_v2_service_descriptor_free(smartlist_get(descs, i));
-          smartlist_clear(descs);
-        }
       }
-      smartlist_free(descs);
-      smartlist_free(client_cookies);
-      uploaded = 1;
+    }
+    smartlist_free(descs);
+    smartlist_free(client_cookies);
+    uploaded = 1;
+    if (get_options()->PublishHidServDescriptors) {
       log_info(LD_REND, "Successfully uploaded v2 rend descriptors!");
+    } else {
+      log_info(LD_REND, "Successfully stored created v2 rend descriptors!");
     }
   }
 
