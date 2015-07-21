@@ -39,6 +39,7 @@ void rend_cache_free_all(void);
 int rend_cache_lookup_entry(const char *query, int version,
                             rend_cache_entry_t **entry_out);
 int rend_cache_lookup_v2_desc_as_dir(const char *query, const char **desc);
+int rend_cache_lookup_v2_desc_as_service(const char *query, const char **desc);
 /** Return value from rend_cache_store_v2_desc_as_{dir,client}. */
 typedef enum {
   RCS_NOTDIR = -2, /**< We're not a directory */
@@ -47,6 +48,8 @@ typedef enum {
 } rend_cache_store_status_t;
 
 rend_cache_store_status_t rend_cache_store_v2_desc_as_dir(const char *desc);
+rend_cache_store_status_t rend_cache_store_v2_desc_as_service(
+                                                const char *desc);
 rend_cache_store_status_t rend_cache_store_v2_desc_as_client(const char *desc,
                                                 const char *desc_id_base32,
                                                 const rend_data_t *rend_query,
