@@ -23,7 +23,6 @@
 #include "rendclient.h"
 #include "rendcommon.h"
 #include "rendservice.h"
-#include "rendcache.h"
 #include "router.h"
 #include "relay.h"
 #include "rephist.h"
@@ -3212,7 +3211,6 @@ upload_service_descriptor(rend_service_t *service)
   time_t now = time(NULL);
   int rendpostperiod;
   char serviceid[REND_SERVICE_ID_LEN_BASE32+1];
-  char desc_id_base32[REND_DESC_ID_V2_LEN_BASE32 + 1];
   int uploaded = 0;
 
   rendpostperiod = get_options()->RendPostPeriod;
@@ -3259,14 +3257,6 @@ upload_service_descriptor(rend_service_t *service)
         return;
       }
       rend_get_service_id(service->desc->pk, serviceid);
-      /* Add the uploaded descriptor to the local service's descriptor cache */
-      for (i = 0; i < smartlist_len(descs); i++) {
-        rend_encoded_v2_service_descriptor_t *desc = smartlist_get(descs, i);
-        rend_cache_store_v2_desc_as_service(desc->desc_str);
-        base32_encode(desc_id_base32, sizeof(desc_id_base32),
-              desc->desc_id, DIGEST_LEN);
-        control_event_hs_descriptor_created(serviceid, desc_id_base32);
-      }
       if (get_options()->PublishHidServDescriptors) {
         /* Post the current descriptors to the hidden service directories. */
         log_info(LD_REND, "Launching upload for hidden service %s",
@@ -3304,13 +3294,6 @@ upload_service_descriptor(rend_service_t *service)
         if (get_options()->PublishHidServDescriptors) {
           directory_post_to_hs_dir(service->desc, descs, NULL, serviceid,
                                    seconds_valid);
-        }
-        for (i = 0; i < smartlist_len(descs); i++) {
-          rend_encoded_v2_service_descriptor_t *desc = smartlist_get(descs, i);
-          rend_cache_store_v2_desc_as_service(desc->desc_str);
-          base32_encode(desc_id_base32, sizeof(desc_id_base32),
-                desc->desc_id, DIGEST_LEN);
-          control_event_hs_descriptor_created(serviceid, desc_id_base32);
         }
         /* Free memory for descriptors. */
         for (i = 0; i < smartlist_len(descs); i++)
