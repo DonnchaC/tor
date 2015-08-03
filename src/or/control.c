@@ -1743,7 +1743,7 @@ getinfo_helper_dir(control_connection_t *control_conn,
       return -1;
     }
 
-    if (!rend_cache_lookup_entry(question, -1, &e, 0)) {
+    if (!rend_cache_lookup_entry(question, -1, &e, REND_CACHE_TYPE_CLIENT)) {
       /* Descriptor found in cache */
       *answer = tor_strdup(e->desc);
     } else {
@@ -1759,7 +1759,7 @@ getinfo_helper_dir(control_connection_t *control_conn,
       return -1;
     }
 
-    if (!rend_cache_lookup_entry(question, -1, &e, 1)) {
+    if (!rend_cache_lookup_entry(question, -1, &e, REND_CACHE_TYPE_SERVICE)) {
       /* Descriptor found in cache */
       *answer = tor_strdup(e->desc);
     } else {

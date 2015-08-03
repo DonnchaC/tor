@@ -207,7 +207,7 @@ rend_cache_clean_v2_descs_as_dir(time_t now, size_t force_remove)
  * -ENOENT means that no entry in the cache was found. */
 int
 rend_cache_lookup_entry(const char *query, int version, rend_cache_entry_t **e,
-                        int service)
+                        rend_cache_type_t cache)
 {
   int ret = 0;
   char key[REND_SERVICE_ID_LEN_BASE32 + 2]; /* <version><query>\0 */
@@ -230,7 +230,7 @@ rend_cache_lookup_entry(const char *query, int version, rend_cache_entry_t **e,
     case 2:
       /* Default is version 2. */
     default:
-      if(service){
+      if(cache == REND_CACHE_TYPE_SERVICE){
         entry = strmap_get_lc(rend_cache_service, query);
       } else {
         tor_snprintf(key, sizeof(key), "%d%s", default_version, query);
@@ -243,7 +243,7 @@ rend_cache_lookup_entry(const char *query, int version, rend_cache_entry_t **e,
     goto end;
   }
   /* Check descriptor is parsed only if lookup is from client cache */
-  if(!service){
+  if(cache == REND_CACHE_TYPE_CLIENT){
     tor_assert(entry->parsed && entry->parsed->intro_nodes);
   }
 
