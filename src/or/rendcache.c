@@ -260,6 +260,7 @@ rend_cache_lookup_v2_desc_as_dir(const char *desc_id, const char **desc)
     return -1;
   }
   /* Lookup descriptor and return. */
+  log_notice(LD_REND, "Got v2 request for descriptor ID: %s", desc_id);
   e = digestmap_get(rend_cache_v2_dir, desc_id_digest);
   if (e) {
     *desc = e->desc;
