@@ -2821,6 +2821,7 @@ append_cell_to_circuit_queue(circuit_t *circ, channel_t *chan,
   }
 #endif
 
+  control_event_cell_status(cell, chan, direction);
   cell_queue_append_packed_copy(circ, queue, exitward, cell,
                                 chan->wide_circ_ids, 1);
 

@@ -1045,6 +1045,8 @@ channel_tls_handle_cell(cell_t *cell, or_connection_t *conn)
    return;
   }
 
+  control_event_cell_status(cell, TLS_CHAN_TO_BASE(chan), CELL_DIRECTION_IN);
+
   handshaking = (TO_CONN(conn)->state != OR_CONN_STATE_OPEN);
 
   if (conn->base_.marked_for_close)
@@ -1125,6 +1127,7 @@ void
 channel_tls_handle_var_cell(var_cell_t *var_cell, or_connection_t *conn)
 {
   channel_tls_t *chan;
+  cell_t *cell = 0;
 
 #ifdef KEEP_TIMING_STATS
   /* how many of each cell have we seen so far this second? needs better
@@ -1153,6 +1156,13 @@ channel_tls_handle_var_cell(var_cell_t *var_cell, or_connection_t *conn)
   tor_assert(conn);
 
   chan = conn->chan;
+
+  // Create a cell_t representation from some fields of the var_cell_t object.
+  cell = tor_malloc_zero(sizeof(cell_t));;
+  cell->command = var_cell->command;
+  cell->circ_id = var_cell->circ_id;
+  control_event_cell_status(cell, TLS_CHAN_TO_BASE(chan), CELL_DIRECTION_IN);
+  tor_free(cell);
 
   if (!chan) {
     log_warn(LD_CHANNEL,

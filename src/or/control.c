@@ -1107,6 +1107,7 @@ struct control_event_t {
 /** Table mapping event values to their names.  Used to implement SETEVENTS
  * and GETINFO events/names, and to keep they in sync. */
 static const struct control_event_t control_event_table[] = {
+  { EVENT_CELL_STATUS , "CELL" },
   { EVENT_CIRCUIT_STATUS, "CIRC" },
   { EVENT_CIRCUIT_STATUS_MINOR, "CIRC_MINOR" },
   { EVENT_STREAM_STATUS, "STREAM" },
@@ -4457,6 +4458,50 @@ connection_control_process_inbuf(control_connection_t *conn)
   conn->incoming_cmd_cur_len = 0;
   goto again;
 }
+
+/** Called when cell received from channel_tls_handle_cell or
+ *  channel_tls_handle_var_cell. Also called for cells added
+ *  to the outgoing queue **/
+int
+control_event_cell_status(cell_t *cell, channel_t *chan, cell_direction_t direction)
+{
+  uint32_t origin_circ_id = 0;
+  circuit_t *circ;
+  const char *direction_str;
+  struct timeval now;
+  char tbuf[ISO_TIME_USEC_LEN+1];
+  if (!EVENT_IS_INTERESTING(EVENT_CELL_STATUS))
+    return 0;
+  tor_assert(cell);
+  tor_assert(chan);
+
+  tor_gettimeofday(&now);
+  format_iso_time_nospace_usec(tbuf, &now);
+
+  // Log the local circ_id if its originating from our OP
+  circ = circuit_get_by_circid_channel(cell->circ_id, chan);
+  if(circ && CIRCUIT_IS_ORIGIN(circ)) { /* we're the OP. Log the origin circ_id */
+    origin_circuit_t *origin_circ = TO_ORIGIN_CIRCUIT(circ);
+    origin_circ_id = origin_circ->global_identifier;
+  }
+
+  if (direction == CELL_DIRECTION_OUT) {
+    direction_str = "OUT";
+  } else {
+    direction_str = "IN";
+  }
+
+  send_control_event(EVENT_CELL_STATUS,
+                     "650 CELL COMMAND=%s CIRC=%lu CIRC_ID=%lu DIRECTION=%s "
+                     "TIME=%s\r\n",
+                     cell_command_to_string(cell->command),
+                     (unsigned long)origin_circ_id,
+                     (unsigned long)cell->circ_id,
+                     direction_str,
+                     tbuf);
+  return 0;
+}
+
 
 /** Something major has happened to circuit <b>circ</b>: tell any
  * interested control connections. */

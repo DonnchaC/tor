@@ -37,6 +37,7 @@ int connection_control_process_inbuf(control_connection_t *conn);
 #define EVENT_NS 0x000F
 int control_event_is_interesting(int event);
 
+int control_event_cell_status(cell_t *cell, channel_t *chan, cell_direction_t direction);
 int control_event_circuit_status(origin_circuit_t *circ,
                                  circuit_status_event_t e, int reason);
 int control_event_circuit_purpose_changed(origin_circuit_t *circ,
@@ -193,6 +194,7 @@ void control_free_all(void);
 #define EVENT_HS_DESC_CONTENT         0x0022
 #define EVENT_NETWORK_LIVENESS        0x0023
 #define EVENT_MAX_                    0x0023
+#define EVENT_CELL_STATUS             0x0024
 
 /* sizeof(control_connection_t.event_mask) in bits, currently a uint64_t */
 #define EVENT_CAPACITY_               0x0040
